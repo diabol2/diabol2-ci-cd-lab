@@ -1,0 +1,52 @@
+name: Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: HTML Linter
+        run: |
+          sudo apt-get update && sudo apt-get install -y tidy
+          tidy -q -e index.html
+
+      - name: Build Docker image
+        run: docker build -t local-site:test .
+
+      - name: Smoke test container
+        if: always()
+        run: |
+          docker run -d -p 8080:80 --name smoke local-site:test
+          sleep 2
+          curl -s http://localhost:8080 | grep -q "Смирнов" && echo "OK" || (echo "FAIL" && exit 1)
+
+  release:
+    needs: ci
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/${{ github.repository }}:latest
